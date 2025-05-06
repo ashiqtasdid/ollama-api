@@ -8,7 +8,6 @@ const API_KEY_SECRET = process.env.API_KEY_SECRET || 'your-secret-key-change-me'
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-key-change-me';
 const TOKEN_EXPIRY = '24h';
 const MAX_PROMPT_LENGTH = 4000; // Maximum allowed prompt length
-const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_REQUESTS_PER_MINUTE = 20;
 
 // Request tracking for rate limiting
@@ -20,7 +19,6 @@ enum ErrorType {
   RATE_LIMIT = 'RATE_LIMIT_ERROR',
   VALIDATION = 'VALIDATION_ERROR',
   SERVICE = 'SERVICE_ERROR',
-  TIMEOUT = 'TIMEOUT_ERROR',
   CONTENT_FILTER = 'CONTENT_FILTER_ERROR',
 }
 
@@ -58,7 +56,7 @@ interface RequestOptions {
   apiKey?: string; // Make this optional
   authorization?: string; // Add this for Bearer token
   userId?: string;
-  timeout?: number;
+  model?: string; // Add model parameter
   safetySettings?: {
     harassmentThreshold?: 'BLOCK_MEDIUM_AND_ABOVE' | 'BLOCK_ONLY_HIGH' | 'BLOCK_NONE';
     hateSpeechThreshold?: 'BLOCK_MEDIUM_AND_ABOVE' | 'BLOCK_ONLY_HIGH' | 'BLOCK_NONE';
@@ -200,6 +198,8 @@ export const generateCompletion = async (
 ): Promise<string> => {
   try {
     let userId = 'anonymous';
+    // Default model to use if none specified
+    const model = options.model || 'deepseek-r1:7b';
 
     // Handle authentication - either API key or Bearer token
     if (options.authorization) {
@@ -263,10 +263,10 @@ export const generateCompletion = async (
     const enhancedPrompt = `${prompt}\n\nProvide your response directly without showing your thinking process, notes, or planning.`;
 
     // Log request (in production, use proper logging)
-    console.log(`[${new Date().toISOString()}] Request from user ${userId}`);
+    console.log(`[${new Date().toISOString()}] Request from user ${userId} using model ${model}`);
 
     const request: OllamaRequest = {
-      model: 'deepseek-r1:7b',
+      model: model,
       prompt: enhancedPrompt,
       stream: false,
       options: {
@@ -276,7 +276,6 @@ export const generateCompletion = async (
     };
 
     const response = await axios.post<OllamaResponse>(OLLAMA_API_URL, request, {
-      timeout: options.timeout || DEFAULT_TIMEOUT_MS,
       headers: {
         'Content-Type': 'application/json'
       }
@@ -300,14 +299,6 @@ export const generateCompletion = async (
           ErrorType.SERVICE,
           'Connection to Ollama refused. Make sure Ollama is running.',
           503
-        );
-      }
-
-      if (axiosError.code === 'ETIMEDOUT' || axiosError.code === 'ECONNABORTED') {
-        throw new ApiError(
-          ErrorType.TIMEOUT,
-          'Request timed out. Please try again later.',
-          504
         );
       }
 
